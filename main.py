@@ -25,16 +25,26 @@ async def async_main(task_group_id):
 
 
 async def find_parent_task_group_id(task_group_id):
-    task_group_ids = [task_group_id]
+    task_group_ids = set([task_group_id])
+    breakpoint()
     task_id = task_group_id
     while True:
         task = await queue.task(task_id)
+        task_group_ids.update(
+            set(
+                task.get("extra", {})
+                .get("action", {})
+                .get("context", {})
+                .get("input", {})
+                .get("previous_graph_ids", [])
+            )
+        )
         if task["taskGroupId"] == task_id:
             break
         else:
             task_id = task["taskGroupId"]
-            task_group_ids.append(task_id)
-    return task_group_ids
+            task_group_ids.add(task_id)
+    return list(task_group_ids)
 
 
 async def get_all_tasks_in_task_group(task_group_id):
