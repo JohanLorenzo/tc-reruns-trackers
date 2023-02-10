@@ -19,14 +19,39 @@ async def async_main(task_group_id):
             for task_group_id in task_group_ids
         ]
     )
-    tasks = [task for list_of_tasks in list_of_list_of_tasks for task in list_of_tasks]
+    tasks = {
+        task["status"]["taskId"]: task
+        for list_of_tasks in list_of_list_of_tasks
+        for task in list_of_tasks
+    }
     log.info(f"Found {len(tasks)} tasks among all task groups")
+
+    task_ids_outside_of_current_task_groups = {
+        dep_task_id
+        for task in tasks.values()
+        for dep_task_id in task["task"]["dependencies"]
+        if dep_task_id not in tasks
+    }
+    log.info(f"Fetching {len(task_ids_outside_of_current_task_groups)} indexed tasks")
+    tasks_outside_of_current_task_groups = await gather_with_concurrency(
+        40,
+        *[
+            get_task_and_status(task_id)
+            for task_id in task_ids_outside_of_current_task_groups
+        ],
+    )
+    tasks.update(
+        {
+            task["status"]["taskId"]: task
+            for task in tasks_outside_of_current_task_groups
+        }
+    )
+    log.info(f"Found {len(tasks)} tasks in all task groups and indexed tasks")
     print_rerun_tasks(tasks)
 
 
 async def find_parent_task_group_id(task_group_id):
     task_group_ids = set([task_group_id])
-    breakpoint()
     task_id = task_group_id
     while True:
         task = await queue.task(task_id)
@@ -69,13 +94,21 @@ async def get_all_tasks_in_task_group(task_group_id):
     return tasks
 
 
+async def get_task_and_status(task_id):
+    status = await queue.status(task_id)
+    return {
+        "task": await queue.task(task_id),
+        "status": status["status"],
+    }
+
+
 def print_rerun_tasks(tasks):
     rerun_tasks = {
         task["status"]["taskId"]: {
             "last_scheduled": task["status"]["runs"][-1]["scheduled"],
             "task_name": task["task"]["metadata"]["name"],
         }
-        for task in tasks
+        for task in tasks.values()
         if len(task.get("status", {}).get("runs", [])) > 1
     }
     pretty_tasks = "\n  ".join(
@@ -91,6 +124,16 @@ def print_rerun_tasks(tasks):
         "  [    LAST SCHEDULED    ] [      TASK ID       ] [       TASK NAME       ]\n"
         f"  {pretty_tasks}"
     )
+
+
+async def gather_with_concurrency(n, *tasks):
+    semaphore = asyncio.Semaphore(n)
+
+    async def sem_task(task):
+        async with semaphore:
+            return await task
+
+    return await asyncio.gather(*(sem_task(task) for task in tasks))
 
 
 def _init_logging(config):
