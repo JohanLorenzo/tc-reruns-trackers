@@ -14,19 +14,18 @@ log = logging.getLogger(__name__)
 async def async_main(task_group_id):
     tasks = await get_all_tasks_in_task_group(task_group_id)
     log.info(f"Found {len(tasks)} tasks")
-    rerun_tasks = [
-        {
+    rerun_tasks = {
+        task["status"]["taskId"]: {
             "last_scheduled": task["status"]["runs"][-1]["scheduled"],
-            "task_id": task["status"]["taskId"],
             "task_name": task["task"]["metadata"]["name"],
         }
         for task in tasks
         if len(task.get("status", {}).get("runs", [])) > 1
-    ]
+    }
     pretty_tasks = "\n  ".join(
         [
-            f"{task['last_scheduled']} {task['task_id']} {task['task_name']}"
-            for task in sorted(rerun_tasks, key=lambda t: t["last_scheduled"])
+            f"{task['last_scheduled']} {task_id} {task['task_name']}"
+            for task_id, task in sorted(rerun_tasks.items(), key=lambda t: t[1]["last_scheduled"])
         ]
     )
     log.warning(
