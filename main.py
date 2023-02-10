@@ -14,6 +14,29 @@ log = logging.getLogger(__name__)
 async def async_main(task_group_id):
     tasks = await get_all_tasks_in_task_group(task_group_id)
     log.info(f"Found {len(tasks)} tasks")
+    print_rerun_tasks(tasks)
+
+async def get_all_tasks_in_task_group(task_group_id):
+    log.info("Looking up all tasks in task group...")
+    tasks = []
+    continuation_token = ""
+    while True:
+        query = {"continuationToken": continuation_token} if continuation_token else {}
+        task_group = await queue.listTaskGroup(
+            task_group_id,
+            query=query,
+        )
+        tasks.extend(task_group["tasks"])
+        continuation_token = task_group.get("continuationToken")
+        if continuation_token:
+            log.info(f"Still querying task group... ({len(tasks)} tasks found so far)")
+        else:
+            break
+
+    return tasks
+
+
+def print_rerun_tasks(tasks):
     rerun_tasks = {
         task["status"]["taskId"]: {
             "last_scheduled": task["status"]["runs"][-1]["scheduled"],
@@ -34,25 +57,6 @@ async def async_main(task_group_id):
         f"  {pretty_tasks}"
     )
 
-
-async def get_all_tasks_in_task_group(task_group_id):
-    log.info("Looking up all tasks in task group...")
-    tasks = []
-    continuation_token = ""
-    while True:
-        query = {"continuationToken": continuation_token} if continuation_token else {}
-        task_group = await queue.listTaskGroup(
-            task_group_id,
-            query=query,
-        )
-        tasks.extend(task_group["tasks"])
-        continuation_token = task_group.get("continuationToken")
-        if continuation_token:
-            log.info(f"Still querying task group... ({len(tasks)} tasks found so far)")
-        else:
-            break
-
-    return tasks
 
 
 def _init_logging(config):
