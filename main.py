@@ -12,12 +12,33 @@ log = logging.getLogger(__name__)
 
 
 async def async_main(task_group_id):
-    tasks = await get_all_tasks_in_task_group(task_group_id)
-    log.info(f"Found {len(tasks)} tasks")
+    task_group_ids = await find_parent_task_group_id(task_group_id)
+    list_of_list_of_tasks = await asyncio.gather(
+        *[
+            get_all_tasks_in_task_group(task_group_id)
+            for task_group_id in task_group_ids
+        ]
+    )
+    tasks = [task for list_of_tasks in list_of_list_of_tasks for task in list_of_tasks]
+    log.info(f"Found {len(tasks)} tasks among all task groups")
     print_rerun_tasks(tasks)
 
+
+async def find_parent_task_group_id(task_group_id):
+    task_group_ids = [task_group_id]
+    task_id = task_group_id
+    while True:
+        task = await queue.task(task_id)
+        if task["taskGroupId"] == task_id:
+            break
+        else:
+            task_id = task["taskGroupId"]
+            task_group_ids.append(task_id)
+    return task_group_ids
+
+
 async def get_all_tasks_in_task_group(task_group_id):
-    log.info("Looking up all tasks in task group...")
+    log.info(f"Looking up all tasks in task group {task_group_id}...")
     tasks = []
     continuation_token = ""
     while True:
@@ -29,7 +50,9 @@ async def get_all_tasks_in_task_group(task_group_id):
         tasks.extend(task_group["tasks"])
         continuation_token = task_group.get("continuationToken")
         if continuation_token:
-            log.info(f"Still querying task group... ({len(tasks)} tasks found so far)")
+            log.info(
+                f"Still querying task group {task_group_id}... ({len(tasks)} tasks found so far)"
+            )
         else:
             break
 
@@ -48,7 +71,9 @@ def print_rerun_tasks(tasks):
     pretty_tasks = "\n  ".join(
         [
             f"{task['last_scheduled']} {task_id} {task['task_name']}"
-            for task_id, task in sorted(rerun_tasks.items(), key=lambda t: t[1]["last_scheduled"])
+            for task_id, task in sorted(
+                rerun_tasks.items(), key=lambda t: t[1]["last_scheduled"]
+            )
         ]
     )
     log.warning(
@@ -56,7 +81,6 @@ def print_rerun_tasks(tasks):
         "  [    LAST SCHEDULED    ] [      TASK ID       ] [       TASK NAME       ]\n"
         f"  {pretty_tasks}"
     )
-
 
 
 def _init_logging(config):
